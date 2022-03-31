@@ -101,7 +101,7 @@ def go_library(name:str, srcs:list, resources:list=None, asm_srcs:list=None, hdr
                visibility:list=None, test_only:bool&testonly=False, complete:bool=True,
                _needs_transitive_deps=False, _all_srcs=False, cover:bool=True,
                filter_srcs:bool=True, _link_private:bool=False, _link_extra:bool=True, _abi:str=None,
-               _generate_import_config:bool=True, import_path:str='', labels:list=[], package:str=None):
+               _generate_import_config:bool=True, import_path:str='', labels:list=[], out:str=None):
     """Generates a Go library which can be reused by other rules.
 
     Args:
@@ -122,17 +122,16 @@ def go_library(name:str, srcs:list, resources:list=None, asm_srcs:list=None, hdr
                     code that you never want to be instrumented.
       filter_srcs (bool): If True, filters source files through Go's standard build constraints.
       import_path (str): If set, this will override the import path of the generated go package.
-      package (str): The package as it would appear at the top of the go source files. Defaults
-                     to name.
+      out (str): The name of the archive this rule should output. This can be useful if two rules output the same thing.
     """
     assert srcs, "Cannot provide an empty srcs list to go_library"
     cover = cover and CONFIG.BUILD_CONFIG == "cover"
-    package = package or name
-    out = package + '.a'
+    out = out or f"{name}.a"
+    out_name = out.removesuffix(".a")
     link_labels = []
     src_labels = []
     private = out.startswith('_')
-    package_path = _get_import_path(package, import_path)
+    package_path = _get_import_path(import_path)
 
 
     # We could just depend on go_src for all our deps but that would mean bringing in srcs for targets outside this
@@ -144,8 +143,8 @@ def go_library(name:str, srcs:list, resources:list=None, asm_srcs:list=None, hdr
         import_cfg = build_rule(
             name=name,
             tag='import_config',
-            cmd = _write_import_config_cmd(package, import_path),
-            outs = [f'{package}.importconfig'],
+            cmd = _write_import_config_cmd(out_name, import_path),
+            outs = [f'{out_name}.importconfig'],
             visibility=visibility,
             test_only=test_only,
             labels=labels,
@@ -164,7 +163,7 @@ def go_library(name:str, srcs:list, resources:list=None, asm_srcs:list=None, hdr
                 'res': resources,
             },
             deps = deps if _all_srcs else None,
-            outs = [f'{package}.embedcfg'],
+            outs = [f'{out_name}.embedcfg'],
             requires = ['go_src'],
             tools = [CONFIG.GO.PLEASE_GO_TOOL],
             test_only = test_only,
@@ -333,12 +332,12 @@ def _trim_import_path(pkg):
         return pkg
 
 def _write_import_config_cmd(package, import_path):
-    import_path = _get_import_path(package, import_path)
+    import_path = _get_import_path(import_path)
     return f"echo packagefile {import_path}=$PKG_DIR/{package}.a >> $OUT"
 
-def _get_import_path(package="", import_path=""):
-    if import_path:
-        return import_path
+def _get_import_path(override=None):
+    if override:
+        return override
 
     pkg = package_name()
 
@@ -353,7 +352,7 @@ def _get_import_path(package="", import_path=""):
     return path
 
 def cgo_library(name:str, srcs:list=[], resources:list=None, go_srcs:list=[], c_srcs:list=[], hdrs:list=[],
-                package:str=None, compiler_flags:list&cflags=[], linker_flags:list&ldflags=[], pkg_config:list=[],
+                out:str=None, compiler_flags:list&cflags=[], linker_flags:list&ldflags=[], pkg_config:list=[],
                 subdir:str='', deps:list=[], visibility:list=None, test_only:bool&testonly=False, import_path:str=''):
     """Generates a Go library which can be reused by other rules.
 
@@ -397,7 +396,7 @@ def cgo_library(name:str, srcs:list=[], resources:list=None, go_srcs:list=[], c_
             name = name,
             srcs = go_srcs,
             resources = resources,
-            package = package,
+            out = out,
             deps = deps,
             import_path = import_path,
             visibility = visibility,
@@ -410,7 +409,7 @@ def cgo_library(name:str, srcs:list=[], resources:list=None, go_srcs:list=[], c_
 
     # Resolve the import_path early
     # _write_import_config_cmd won't resolve it again
-    import_path = _get_import_path(package or name, import_path)
+    import_path = _get_import_path( import_path)
 
     cgo_rule = build_rule(
         name = name,
@@ -493,7 +492,7 @@ def cgo_library(name:str, srcs:list=[], resources:list=None, go_srcs:list=[], c_
 
 
 def _merge_cgo_obj(name, a_rule, o_rule=None, visibility=None, test_only=False, tag='',
-                   linker_flags:list=[], deps=None, exported_deps=None, provides=None, package=None, labels:list=[]):
+                   linker_flags:list=[], deps=None, exported_deps=None, provides=None, out=None, labels:list=[]):
     """Defines a rule to merge a cgo object into a Go library."""
     if o_rule:
         cmd = 'cp $SRCS_A "$OUT" && chmod +w "$OUT" && "$TOOLS_AR" x $SRCS_O && "$TOOLS_GO" tool pack r "$OUT" *.o'
@@ -507,7 +506,7 @@ def _merge_cgo_obj(name, a_rule, o_rule=None, visibility=None, test_only=False, 
             'a': [a_rule],
             'o': [o_rule] if o_rule else [],
         },
-        outs = [(package or name) + '.a'],
+        outs = [out or f"{name}.a"],
         cmd = cmd,
         tools = {
             'go': [CONFIG.GO.GO_TOOL],
@@ -645,7 +644,7 @@ def go_test(name:str, srcs:list, resources:list=None, data:list|dict=None, deps:
         name = '_%s#lib' % name,
         srcs = srcs,
         resources = resources,
-        package = test_package,
+        out = f"{test_package}.a",
         deps = deps,
         _all_srcs=not external,
         labels = labels,
@@ -667,7 +666,7 @@ def go_test(name:str, srcs:list, resources:list=None, data:list|dict=None, deps:
             labels = labels + ['link:plz-out/go/pkg/%s_%s' % (CONFIG.OS, CONFIG.ARCH)],
             test_only = True,
             deps = deps,
-            package = archive_name,
+            out = f"{archive_name}.a",
         )
     else:
         archive_name = test_package
@@ -792,7 +791,7 @@ def go_benchmark(name:str, srcs:list, data:list|dict=None, deps:list=[], visibil
     lib_rule = go_library(
         name = '_%s#lib' % name,
         srcs = srcs,
-        package = test_package,
+        out = f"{test_package}.a",
         deps = deps,
         _all_srcs=not external,
         labels = labels,

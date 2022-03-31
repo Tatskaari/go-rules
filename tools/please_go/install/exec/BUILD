@@ -5,6 +5,7 @@ filegroup(
     srcs = glob(["*.go"]),
     visibility = ["//tools/please_go:bootstrap"]
 )
+
 go_library(
     name = "exec",
     srcs = [
