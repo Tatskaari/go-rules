@@ -1,5 +1,10 @@
 Version 1.14.0
 --------------
+    * Provide the package info from `go_library()` the same way we do for
+      `go_module()` (#209)
+
+Version 1.14.0
+--------------
     * please_go upgraded to write build tags to subrepo plz config (#207)
     * go_toolchain, go_system_toolchain, go_stdlib and go_repo all take
     build_tags argument but default to the go config values. (#207)
